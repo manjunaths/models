@@ -51,6 +51,7 @@ embeddings are stored in separate files.
 
 """
 
+from __future__ import print_function
 import argparse
 import glob
 import math
@@ -163,7 +164,7 @@ def write_embeddings_to_disk(config, model, sess):
   # Row Embedding
   row_vocab_path = config.input_base_path + '/row_vocab.txt'
   row_embedding_output_path = config.output_base_path + '/row_embedding.tsv'
-  print 'Writing row embeddings to:', row_embedding_output_path
+  print('Writing row embeddings to:', row_embedding_output_path)
   sys.stdout.flush()
   write_embedding_tensor_to_disk(row_vocab_path, row_embedding_output_path,
                                  sess, model.row_embedding)
@@ -171,7 +172,7 @@ def write_embeddings_to_disk(config, model, sess):
   # Column Embedding
   col_vocab_path = config.input_base_path + '/col_vocab.txt'
   col_embedding_output_path = config.output_base_path + '/col_embedding.tsv'
-  print 'Writing column embeddings to:', col_embedding_output_path
+  print('Writing column embeddings to:', col_embedding_output_path)
   sys.stdout.flush()
   write_embedding_tensor_to_disk(col_vocab_path, col_embedding_output_path,
                                  sess, model.col_embedding)
@@ -185,7 +186,7 @@ class SwivelModel(object):
     self._config = config
 
     # Create paths to input data files
-    print 'Reading model from:', config.input_base_path
+    print('Reading model from:', config.input_base_path)
     sys.stdout.flush()
     count_matrix_files = glob.glob(config.input_base_path + '/shard-*.pb')
     row_sums_path = config.input_base_path + '/row_sums.txt'
@@ -197,55 +198,52 @@ class SwivelModel(object):
 
     self.n_rows = len(row_sums)
     self.n_cols = len(col_sums)
-    print 'Matrix dim: (%d,%d) SubMatrix dim: (%d,%d) ' % (
-        self.n_rows, self.n_cols, config.submatrix_rows, config.submatrix_cols)
+    print('Matrix dim: (%d,%d) SubMatrix dim: (%d,%d) ' % (
+        self.n_rows, self.n_cols, config.submatrix_rows, config.submatrix_cols))
     sys.stdout.flush()
     self.n_submatrices = (self.n_rows * self.n_cols /
                           (config.submatrix_rows * config.submatrix_cols))
-    print 'n_submatrices: %d' % (self.n_submatrices)
+    print('n_submatrices: %d' % (self.n_submatrices))
     sys.stdout.flush()
 
     # ===== CREATE VARIABLES ======
+    # embeddings
+    self.row_embedding = embeddings_with_init(
+      embedding_dim=config.embedding_size,
+      vocab_size=self.n_rows,
+      name='row_embedding')
+    self.col_embedding = embeddings_with_init(
+      embedding_dim=config.embedding_size,
+      vocab_size=self.n_cols,
+      name='col_embedding')
+    tf.summary.histogram('row_emb', self.row_embedding)
+    tf.summary.histogram('col_emb', self.col_embedding)
 
-    with tf.device('/cpu:0'):
-      # embeddings
-      self.row_embedding = embeddings_with_init(
-          embedding_dim=config.embedding_size,
-          vocab_size=self.n_rows,
-          name='row_embedding')
-      self.col_embedding = embeddings_with_init(
-          embedding_dim=config.embedding_size,
-          vocab_size=self.n_cols,
-          name='col_embedding')
-      tf.summary.histogram('row_emb', self.row_embedding)
-      tf.summary.histogram('col_emb', self.col_embedding)
-
-      matrix_log_sum = math.log(np.sum(row_sums) + 1)
-      row_bias_init = [math.log(x + 1) for x in row_sums]
-      col_bias_init = [math.log(x + 1) for x in col_sums]
-      self.row_bias = tf.Variable(row_bias_init,
-                                  trainable=config.trainable_bias)
-      self.col_bias = tf.Variable(col_bias_init,
-                                  trainable=config.trainable_bias)
-      tf.summary.histogram('row_bias', self.row_bias)
-      tf.summary.histogram('col_bias', self.col_bias)
+    matrix_log_sum = math.log(np.sum(row_sums) + 1)
+    row_bias_init = [math.log(x + 1) for x in row_sums]
+    col_bias_init = [math.log(x + 1) for x in col_sums]
+    self.row_bias = tf.Variable(
+        row_bias_init, trainable=config.trainable_bias)
+    self.col_bias = tf.Variable(
+        col_bias_init, trainable=config.trainable_bias)
+    tf.summary.histogram('row_bias', self.row_bias)
+    tf.summary.histogram('col_bias', self.col_bias)
 
     # ===== CREATE GRAPH =====
 
     # Get input
-    with tf.device('/cpu:0'):
-      global_row, global_col, count = count_matrix_input(
-          count_matrix_files, config.submatrix_rows, config.submatrix_cols)
+    global_row, global_col, count = count_matrix_input(
+      count_matrix_files, config.submatrix_rows, config.submatrix_cols)
 
-      # Fetch embeddings.
-      selected_row_embedding = tf.nn.embedding_lookup(self.row_embedding,
-                                                      global_row)
-      selected_col_embedding = tf.nn.embedding_lookup(self.col_embedding,
-                                                      global_col)
+    # Fetch embeddings.
+    selected_row_embedding = tf.nn.embedding_lookup(
+        self.row_embedding, global_row)
+    selected_col_embedding = tf.nn.embedding_lookup(
+        self.col_embedding, global_col)
 
-      # Fetch biases.
-      selected_row_bias = tf.nn.embedding_lookup([self.row_bias], global_row)
-      selected_col_bias = tf.nn.embedding_lookup([self.col_bias], global_col)
+    # Fetch biases.
+    selected_row_bias = tf.nn.embedding_lookup([self.row_bias], global_row)
+    selected_col_bias = tf.nn.embedding_lookup([self.col_bias], global_col)
 
     # Multiply the row and column embeddings to generate predictions.
     predictions = tf.matmul(
@@ -316,15 +314,15 @@ def main(_):
     t0 = [time.time()]
 
     def TrainingFn():
-      for _ in range(n_steps_per_thread):
+      for _ in range(int(n_steps_per_thread)):
         _, global_step = sess.run([model.train_op, model.global_step])
         n_steps_between_status_updates = 100
         if (global_step % n_steps_between_status_updates) == 0:
           elapsed = float(time.time() - t0[0])
-          print '%d/%d submatrices trained (%.1f%%), %.1f submatrices/sec' % (
+          print('%d/%d submatrices trained (%.1f%%), %.1f submatrices/sec' % (
               global_step, n_submatrices_to_train,
               100.0 * global_step / n_submatrices_to_train,
-              n_steps_between_status_updates / elapsed)
+              n_steps_between_status_updates / elapsed))
           sys.stdout.flush()
           t0[0] = time.time()
 
